@@ -5,14 +5,13 @@ import {
   User,
   School,
   Sparkles,
-  Sliders,
   CheckCircle2,
   RefreshCw,
   Image as ImageIcon,
-  Zap,
+  ShieldAlert,
+  Lock,
 } from 'lucide-react';
 import { SAMPLE_STUDENTS } from '../data/careerTemplates';
-import { BlendSettings, DEFAULT_BLEND_SETTINGS } from '../utils/faceBlendEngine';
 
 export interface StudentFormData {
   fullName: string;
@@ -20,8 +19,6 @@ export interface StudentFormData {
   dreamCareer: string;
   photoUrl: string | null;
   photoBase64: string | null;
-  mode: 'ai-synthesis' | 'smart-blend';
-  blendSettings: BlendSettings;
 }
 
 interface StudentInputFormProps {
@@ -42,7 +39,6 @@ export const StudentInputForm: React.FC<StudentInputFormProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
-  const [showBlendControls, setShowBlendControls] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
 
   // File upload handler
@@ -122,14 +118,32 @@ export const StudentInputForm: React.FC<StudentInputFormProps> = ({
     setIsCameraActive(false);
   };
 
-  const selectSampleStudent = (sample: (typeof SAMPLE_STUDENTS)[0]) => {
+  // Convert image URL to base64
+  const urlToBase64 = async (url: string): Promise<string> => {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  const selectSampleStudent = async (sample: (typeof SAMPLE_STUDENTS)[0]) => {
     onChange({
       fullName: sample.name,
       studentClass: sample.studentClass,
       dreamCareer: sample.dreamCareer,
-      photoUrl: sample.avatarSvg,
-      photoBase64: sample.avatarSvg,
+      photoUrl: sample.avatarUrl,
+      photoBase64: sample.avatarUrl,
     });
+    try {
+      const b64 = await urlToBase64(sample.avatarUrl);
+      onChange({ photoBase64: b64, photoUrl: sample.avatarUrl });
+    } catch (e) {
+      console.warn('Could not convert sample to base64, using raw url:', e);
+    }
   };
 
   const canSubmit =
@@ -139,7 +153,7 @@ export const StudentInputForm: React.FC<StudentInputFormProps> = ({
     Boolean(formData.photoUrl);
 
   return (
-    <div className="backdrop-blur-md bg-white/85 rounded-3xl border border-sky-100 shadow-xl shadow-sky-100/50 p-6 sm:p-7 space-y-6">
+    <div className="backdrop-blur-md bg-white/90 rounded-3xl border border-sky-100 shadow-xl shadow-sky-100/50 p-6 sm:p-7 space-y-5">
       {/* Panel Header */}
       <div className="flex items-center justify-between pb-3 border-b border-sky-50">
         <div>
@@ -150,21 +164,21 @@ export const StudentInputForm: React.FC<StudentInputFormProps> = ({
             Thông Tin & Chân Dung Bé
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Tải ảnh rõ khuôn mặt để tạo ảnh chân thực như ngoài đời
+            Tải ảnh chụp chân thực, rõ khuôn mặt để model AI tái tạo chính xác
           </p>
         </div>
 
         {/* Quick Sample Selector */}
-        <div className="flex items-center gap-1">
-          <span className="text-[11px] text-slate-400 font-medium mr-1 hidden sm:inline">Ảnh mẫu:</span>
-          {SAMPLE_STUDENTS.map((sample, idx) => (
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] text-slate-400 font-medium mr-1 hidden sm:inline">Ảnh mẫu thật:</span>
+          {SAMPLE_STUDENTS.map((sample) => (
             <button
               key={sample.id}
               onClick={() => selectSampleStudent(sample)}
-              className="w-7 h-7 rounded-full overflow-hidden border border-sky-300 hover:scale-110 transition-transform shadow-xs cursor-pointer"
-              title={`Thử mẫu ${sample.name} - ${sample.dreamCareer}`}
+              className="w-8 h-8 rounded-full overflow-hidden border-2 border-amber-300 hover:scale-110 transition-transform shadow-xs cursor-pointer bg-slate-100"
+              title={`Thử ảnh học sinh: ${sample.name} - ${sample.dreamCareer}`}
             >
-              <img src={sample.avatarSvg} alt={sample.name} className="w-full h-full object-cover" />
+              <img src={sample.avatarUrl} alt={sample.name} className="w-full h-full object-cover" />
             </button>
           ))}
         </div>
@@ -225,11 +239,11 @@ export const StudentInputForm: React.FC<StudentInputFormProps> = ({
               <div className="flex items-center justify-center sm:justify-start gap-2">
                 <span className="text-xs font-bold text-slate-700">Ảnh chân dung sẵn sàng</span>
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                  90% Nét Mặt
+                  Ảnh Chụp Thật
                 </span>
               </div>
               <p className="text-xs text-slate-500">
-                Khuôn mặt đã được định vị trong khung tròn chuẩn ảnh thẻ kỷ niệm tiểu học.
+                Ảnh gốc được dùng làm tham chiếu nhận diện để giữ trọn vẹn nét mặt của bé.
               </p>
               <div className="flex items-center justify-center sm:justify-start gap-2 pt-1">
                 <button
@@ -266,14 +280,14 @@ export const StudentInputForm: React.FC<StudentInputFormProps> = ({
               <Upload className="w-7 h-7" />
             </div>
             <p className="text-sm font-semibold text-slate-700">
-              Kéo & thả ảnh chân dung của bé vào đây
+              Kéo & thả ảnh chân dung chụp thật của bé vào đây
             </p>
             <p className="text-xs text-slate-400 mt-1">
-              hoặc bấm để chọn ảnh từ máy tính / điện thoại (JPG, PNG)
+              Ảnh chụp rõ mặt, không mờ nhòe (JPG, PNG)
             </p>
             <div className="mt-4 flex items-center justify-center gap-2">
               <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-white border border-slate-200 text-slate-600 shadow-xs">
-                <ImageIcon className="w-3.5 h-3.5 text-sky-500" /> Chọn ảnh
+                <ImageIcon className="w-3.5 h-3.5 text-sky-500" /> Chọn ảnh từ máy
               </span>
               <button
                 type="button"
@@ -334,193 +348,27 @@ export const StudentInputForm: React.FC<StudentInputFormProps> = ({
           />
         </div>
 
-        {/* Dream Career - Clean input, NO suggestion chips as requested */}
+        {/* Dream Career - Clean input, NO suggestion chips */}
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-pink-500" />
               Ước mơ của em <span className="text-rose-500">*</span>
             </label>
-            <span className="text-[11px] text-slate-400 italic">Nhập tự do ước mơ của bé</span>
+            <span className="text-[11px] text-slate-400 italic">Nhập tự do (bác sĩ, cầu thủ, phi công...)</span>
           </div>
           <input
             type="text"
             value={formData.dreamCareer}
             onChange={(e) => onChange({ dreamCareer: e.target.value })}
-            placeholder="Ví dụ: Bác sĩ, Phi hành gia, Cầu thủ bóng đá, Chú công an, Cô giáo..."
+            placeholder="Ví dụ: Bác sĩ nhi khoa, Cầu thủ bóng đá, Phi công, Công an, Giáo viên..."
             className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white/90 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent transition-all placeholder:text-slate-400 shadow-xs"
           />
         </div>
       </div>
 
-      {/* Mode Selection: AI Synthesis vs Smart Face-Blend */}
-      <div className="pt-2 border-t border-sky-50 space-y-3">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-            <Zap className="w-3.5 h-3.5 text-amber-500" />
-            Chế độ kiến tạo ảnh
-          </label>
-          {formData.mode === 'smart-blend' && (
-            <button
-              type="button"
-              onClick={() => setShowBlendControls(!showBlendControls)}
-              className="text-xs font-medium text-sky-600 hover:text-sky-700 flex items-center gap-1 cursor-pointer"
-            >
-              <Sliders className="w-3.5 h-3.5" />
-              {showBlendControls ? 'Ẩn tinh chỉnh' : 'Tinh chỉnh khuôn mặt'}
-            </button>
-          )}
-        </div>
-
-        <div className="grid grid-cols-2 gap-2.5">
-          <button
-            type="button"
-            onClick={() => onChange({ mode: 'ai-synthesis' })}
-            className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
-              formData.mode === 'ai-synthesis'
-                ? 'bg-gradient-to-br from-sky-50 to-indigo-50 border-sky-400 shadow-sm ring-2 ring-sky-200'
-                : 'bg-white/60 border-slate-200 hover:bg-slate-50'
-            }`}
-          >
-            <div className="flex items-center gap-1.5 font-bold text-xs text-sky-900 mb-0.5">
-              <span>✨ AI Tái Tạo Siêu Thực</span>
-            </div>
-            <p className="text-[11px] text-slate-500 leading-tight">
-              Giữ 90% nét mặt, vẽ đồng phục & không gian bằng Gemini
-            </p>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onChange({ mode: 'smart-blend' })}
-            className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
-              formData.mode === 'smart-blend'
-                ? 'bg-gradient-to-br from-amber-50 to-rose-50 border-amber-400 shadow-sm ring-2 ring-amber-200'
-                : 'bg-white/60 border-slate-200 hover:bg-slate-50'
-            }`}
-          >
-            <div className="flex items-center gap-1.5 font-bold text-xs text-amber-900 mb-0.5">
-              <span>🎨 Smart Face-Blend</span>
-            </div>
-            <p className="text-[11px] text-slate-500 leading-tight">
-              Giữ 100% pixel mặt gốc, khử viền & hòa sắc vào trang phục
-            </p>
-          </button>
-        </div>
-
-        {/* Fine-tuning sliders for Smart Face-Blend Mode */}
-        {formData.mode === 'smart-blend' && showBlendControls && (
-          <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/80 space-y-3.5 text-xs">
-            <div className="flex items-center justify-between font-bold text-slate-700">
-              <span>Bộ Tinh Chỉnh Khớp Mặt (Canvas)</span>
-              <button
-                type="button"
-                onClick={() => onChange({ blendSettings: { ...DEFAULT_BLEND_SETTINGS } })}
-                className="text-[11px] text-amber-700 hover:underline cursor-pointer"
-              >
-                Đặt lại chuẩn
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <div className="flex justify-between text-slate-600 mb-1">
-                  <span>Độ phóng to mặt:</span>
-                  <span className="font-semibold">{formData.blendSettings.scale.toFixed(2)}x</span>
-                </div>
-                <input
-                  type="range"
-                  min="0.75"
-                  max="1.35"
-                  step="0.05"
-                  value={formData.blendSettings.scale}
-                  onChange={(e) =>
-                    onChange({
-                      blendSettings: {
-                        ...formData.blendSettings,
-                        scale: parseFloat(e.target.value),
-                      },
-                    })
-                  }
-                  className="w-full accent-amber-500"
-                />
-              </div>
-
-              <div>
-                <div className="flex justify-between text-slate-600 mb-1">
-                  <span>Độ mềm viền (Feather):</span>
-                  <span className="font-semibold">{formData.blendSettings.feather}px</span>
-                </div>
-                <input
-                  type="range"
-                  min="10"
-                  max="50"
-                  step="2"
-                  value={formData.blendSettings.feather}
-                  onChange={(e) =>
-                    onChange({
-                      blendSettings: {
-                        ...formData.blendSettings,
-                        feather: parseInt(e.target.value, 10),
-                      },
-                    })
-                  }
-                  className="w-full accent-amber-500"
-                />
-              </div>
-
-              <div>
-                <div className="flex justify-between text-slate-600 mb-1">
-                  <span>Vị trí dọc (Y):</span>
-                  <span className="font-semibold">{formData.blendSettings.offsetY}px</span>
-                </div>
-                <input
-                  type="range"
-                  min="-60"
-                  max="60"
-                  step="2"
-                  value={formData.blendSettings.offsetY}
-                  onChange={(e) =>
-                    onChange({
-                      blendSettings: {
-                        ...formData.blendSettings,
-                        offsetY: parseInt(e.target.value, 10),
-                      },
-                    })
-                  }
-                  className="w-full accent-amber-500"
-                />
-              </div>
-
-              <div>
-                <div className="flex justify-between text-slate-600 mb-1">
-                  <span>Độ ấm màu da:</span>
-                  <span className="font-semibold">{formData.blendSettings.warmth}</span>
-                </div>
-                <input
-                  type="range"
-                  min="-20"
-                  max="30"
-                  step="2"
-                  value={formData.blendSettings.warmth}
-                  onChange={(e) =>
-                    onChange({
-                      blendSettings: {
-                        ...formData.blendSettings,
-                        warmth: parseInt(e.target.value, 10),
-                      },
-                    })
-                  }
-                  className="w-full accent-amber-500"
-                />
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Action Button: Nút Tạo Ảnh hiển thị rõ ngay dưới vùng chế độ kiến tạo ảnh */}
-      <div className="pt-3 border-t border-sky-100">
+      {/* Action Button: Nút Tạo Ảnh hiển thị rõ ngay dưới vùng nhập liệu */}
+      <div className="pt-2">
         <button
           type="button"
           onClick={onSubmit}
@@ -535,7 +383,9 @@ export const StudentInputForm: React.FC<StudentInputFormProps> = ({
             <div className="flex items-center gap-3">
               <RefreshCw className="w-5 h-5 animate-spin text-blue-700" />
               <div className="text-left">
-                <div className="text-sm font-black uppercase tracking-wider text-blue-900">Đang Xử Lý Tạo Ảnh...</div>
+                <div className="text-sm font-black uppercase tracking-wider text-blue-900">
+                  Đang Xử Lý Tạo Ảnh...
+                </div>
                 <div className="text-xs font-semibold text-blue-800">{loadingStep}</div>
               </div>
             </div>
@@ -557,6 +407,14 @@ export const StudentInputForm: React.FC<StudentInputFormProps> = ({
             👉 Vui lòng tải ảnh và điền đủ <strong>Họ tên, Lớp, Ước mơ</strong> để bấm Tạo Ảnh.
           </p>
         )}
+      </div>
+
+      {/* Privacy & Parental Consent Notice */}
+      <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 text-[11px] text-slate-500 flex items-start gap-2 leading-relaxed">
+        <Lock className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+        <span>
+          <strong>Quyền riêng tư:</strong> Ảnh học sinh được xử lý trực tiếp trong phiên làm việc và không lưu trữ trên máy chủ. Thầy cô vui lòng xin phép phụ huynh trước khi chụp và tải ảnh.
+        </span>
       </div>
     </div>
   );

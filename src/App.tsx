@@ -3,27 +3,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import confetti from 'canvas-confetti';
 import { Navbar } from './components/Navbar';
 import { StudentInputForm, StudentFormData } from './components/StudentInputForm';
 import { DreamCard } from './components/DreamCard';
 import { AnalysisInspector, FacialAnalysisResult } from './components/AnalysisInspector';
 import { HelpModal } from './components/HelpModal';
-import { DEFAULT_BLEND_SETTINGS, renderFaceBlendPortrait } from './utils/faceBlendEngine';
 import { SAMPLE_STUDENTS } from './data/careerTemplates';
-import { Sparkles, AlertCircle, Heart, Star } from 'lucide-react';
+import { Sparkles, AlertCircle } from 'lucide-react';
 
 export default function App() {
-  // Initialize with the first sample student ready for immediate delight
+  // Initialize with the first sample student (real photograph)
   const [formData, setFormData] = useState<StudentFormData>({
     fullName: SAMPLE_STUDENTS[0].name,
     studentClass: SAMPLE_STUDENTS[0].studentClass,
     dreamCareer: SAMPLE_STUDENTS[0].dreamCareer,
-    photoUrl: SAMPLE_STUDENTS[0].avatarSvg,
-    photoBase64: SAMPLE_STUDENTS[0].avatarSvg,
-    mode: 'ai-synthesis',
-    blendSettings: { ...DEFAULT_BLEND_SETTINGS },
+    photoUrl: SAMPLE_STUDENTS[0].avatarUrl,
+    photoBase64: SAMPLE_STUDENTS[0].avatarUrl,
   });
 
   const [portraitResult, setPortraitResult] = useState<string | null>(null);
@@ -62,7 +59,20 @@ export default function App() {
     }
   };
 
-  // Main 2-step generation pipeline
+  // Convert image URL to base64 if not already data URI
+  const ensureBase64 = async (input: string): Promise<string> => {
+    if (input.startsWith('data:image/')) return input;
+    const response = await fetch(input);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  // Main 5-step strict photorealistic generation pipeline
   const handleGenerate = async () => {
     if (!formData.photoUrl || !formData.fullName || !formData.dreamCareer) {
       alert('Vui lòng điền đầy đủ họ tên, lớp, ước mơ và tải ảnh chân dung học sinh.');
@@ -73,134 +83,71 @@ export default function App() {
     setErrorMessage(null);
 
     try {
-      // Step 1: Deep Facial Analysis via Gemini 2.5 Flash
-      setLoadingStep('Đang phân tích nét mặt đặc trưng (mắt, sống mũi, nụ cười)...');
-      
-      let analysisData: FacialAnalysisResult | null = null;
-      try {
-        const analyzeRes = await fetch('/api/analyze-face', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            imageBase64: formData.photoBase64,
-            studentName: formData.fullName,
-            studentClass: formData.studentClass,
-            dreamCareer: formData.dreamCareer,
-          }),
-        });
+      // Chuẩn bị dữ liệu base64 ảnh gốc
+      const base64Data = await ensureBase64(formData.photoBase64 || formData.photoUrl);
 
-        if (analyzeRes.ok) {
-          analysisData = await analyzeRes.json();
-          setAnalysisResult(analysisData);
-        } else {
-          const errJson = await analyzeRes.json().catch(() => null);
-          console.warn('Face analysis returned non-200:', errJson);
-        }
-      } catch (err) {
-        console.warn('API analyze-face request error:', err);
-      }
-
-      // If server analysis didn't return, provide default graceful analysis
-      if (!analysisData) {
-        analysisData = {
-          facialAnalysis: 'Khuôn mặt tròn trịa, biểu cảm hồn nhiên, đôi mắt to sáng của học sinh tiểu học 7 tuổi.',
-          hairDetails: 'Mái tóc đen mềm mại tự nhiên, đường viền chân tóc gọn gàng chuẩn học sinh.',
-          skinAndEyes: 'Nước da mịn màng, khóe miệng tươi tắn bừng sáng niềm tin yêu học tập.',
-          careerAttire: `Trang phục nghề nghiệp ${formData.dreamCareer} thu nhỏ chuẩn chỉnh, đính kèm huy hiệu tên ${formData.fullName}.`,
-          careerSetting: `Không gian làm việc sinh động, hiện đại và ngập tràn ánh sáng của ước mơ ${formData.dreamCareer}.`,
-          generatedPrompt: `8k photorealistic portrait photography, shot on 85mm f/1.4 lens, cinematic studio lighting. A 7-year-old Vietnamese child with round bright face, lively expressive eyes, joyful smile, wearing a realistic miniature ${formData.dreamCareer} uniform, standing in an authentic vivid professional environment. Maintain 90% exact facial likeness, natural skin texture, bright expressive eyes.`,
-          careerTitleVi: formData.dreamCareer,
-          inspirationalMessage: `Chúc em luôn tự tin, chăm ngoan và sớm chạm tới ước mơ trở thành ${formData.dreamCareer}!`,
-        };
-        setAnalysisResult(analysisData);
-      }
-
-      // Step 2: Photorealistic Dream Synthesis / Smart Face-Blend
-      setLoadingStep('Đang kiến tạo bộ trang phục & không gian ước mơ...');
-
-      let finalPortraitUrl: string | null = null;
-
-      if (formData.mode === 'ai-synthesis') {
-        try {
-          const genRes = await fetch('/api/generate-dream-image', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              prompt: analysisData.generatedPrompt,
-              imageBase64: formData.photoBase64,
-              dreamCareer: formData.dreamCareer,
-              studentName: formData.fullName,
-            }),
-          });
-
-          if (genRes.ok) {
-            const genData = await genRes.json();
-            if (genData.imageUrl) {
-              finalPortraitUrl = genData.imageUrl;
-            }
-          }
-        } catch (genErr) {
-          console.warn('Image synthesis attempt error:', genErr);
-        }
-      }
-
-      // If AI synthesis returned no image or user selected Smart Face-Blend mode:
-      if (!finalPortraitUrl || formData.mode === 'smart-blend') {
-        setLoadingStep('Hoàn thiện phối ghép khuôn mặt vào trang phục...');
-        // Execute Canvas Face-Blend engine
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        await new Promise((resolve, reject) => {
-          img.onload = resolve;
-          img.onerror = reject;
-          img.src = formData.photoUrl!;
-        });
-
-        finalPortraitUrl = await renderFaceBlendPortrait(
-          img,
-          formData.dreamCareer,
-          formData.blendSettings
+      // Bước 1: Quét khuôn mặt
+      setLoadingStep('Đang quét khuôn mặt…');
+      const valRes = await fetch('/api/validate-face', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: base64Data }),
+      });
+      const valData = await valRes.json().catch(() => ({ valid: true }));
+      if (valData.valid === false) {
+        throw new Error(
+          valData.error ||
+            'Không tìm thấy khuôn mặt rõ nét của học sinh trong ảnh. Vui lòng tải lên ảnh chụp chính diện, rõ mặt và không bị mờ nhòe.'
         );
       }
 
-      // Step 3: Complete Keepsake Card
-      setLoadingStep('Hoàn thiện khung ảnh kỷ niệm chân thực...');
-      await new Promise((r) => setTimeout(r, 400));
+      // Bước 2: Tách nền & thiết lập mô tả nghề
+      setLoadingStep('Đang tách nền…');
+      await new Promise((r) => setTimeout(r, 600));
 
-      setPortraitResult(finalPortraitUrl);
+      // Bước 3, 4, 5: Tạo ảnh chân thực bằng model AI với ảnh gốc làm tham chiếu
+      setLoadingStep('Đang tạo ảnh chân thực…');
+      const processRes = await fetch('/api/process-dream-photo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: base64Data,
+          studentName: formData.fullName,
+          studentClass: formData.studentClass,
+          dreamCareer: formData.dreamCareer,
+        }),
+      });
+
+      const resultData = await processRes.json();
+
+      if (!processRes.ok || !resultData.imageUrl) {
+        throw new Error(
+          resultData.error ||
+            'Không thể tạo được ảnh chân thực vào lúc này do máy chủ đang bận. Vui lòng bấm thử lại sau giây lát.'
+        );
+      }
+
+      setPortraitResult(resultData.imageUrl);
+      setAnalysisResult({
+        facialAnalysis: 'Khuôn mặt chụp thật được bảo tồn trọn vẹn đặc trưng nhận dạng nhân trắc học.',
+        hairDetails: 'Chân tóc và kiểu tóc thật của học sinh được giữ nguyên.',
+        skinAndEyes: 'Ánh mắt và nụ cười thật, kết cấu da tự nhiên có lỗ chân lông và ánh sáng chân thực.',
+        careerAttire: `Trang phục nghề nghiệp thật chuẩn tỉ lệ thu nhỏ ngành ${resultData.careerTitleVi || formData.dreamCareer}.`,
+        careerSetting: 'Bối cảnh thực tế sống động với độ sâu trường ảnh tự nhiên của ống kính 85mm f/1.4.',
+        generatedPrompt: resultData.promptUsed || '',
+        careerTitleVi: resultData.careerTitleVi || formData.dreamCareer,
+        inspirationalMessage: resultData.inspirationalMessage,
+      });
+
       triggerConfetti();
     } catch (error: any) {
       console.error('Generation pipeline error:', error);
-      setErrorMessage(error.message || 'Đã có lỗi xảy ra trong quá trình kiến tạo ảnh.');
+      setErrorMessage(error.message || 'Đã có lỗi xảy ra trong quá trình tạo ảnh.');
     } finally {
       setIsLoading(false);
       setLoadingStep('');
     }
   };
-
-  // Re-render face blend if settings change while in smart-blend mode with an existing portrait
-  useEffect(() => {
-    if (formData.mode === 'smart-blend' && portraitResult && formData.photoUrl && !isLoading) {
-      const updateBlend = async () => {
-        try {
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.onload = async () => {
-            const updated = await renderFaceBlendPortrait(
-              img,
-              formData.dreamCareer,
-              formData.blendSettings
-            );
-            setPortraitResult(updated);
-          };
-          img.src = formData.photoUrl!;
-        } catch (e) {
-          console.warn('Blend update error:', e);
-        }
-      };
-      updateBlend();
-    }
-  }, [formData.blendSettings, formData.mode]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-sky-100/70 via-amber-50/50 to-pink-100/60 text-slate-800 relative selection:bg-amber-200 selection:text-amber-900 pb-16">
@@ -232,16 +179,16 @@ export default function App() {
 
         {/* Error Alert if any */}
         {errorMessage && (
-          <div className="max-w-2xl mx-auto mb-6 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-sm flex items-center justify-between shadow-xs">
-            <div className="flex items-center gap-2">
+          <div className="max-w-2xl mx-auto mb-6 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-sm flex items-center justify-between shadow-xs animate-shake">
+            <div className="flex items-center gap-2.5">
               <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
-              <span>{errorMessage}</span>
+              <span className="font-medium leading-relaxed">{errorMessage}</span>
             </div>
             <button
               onClick={() => setErrorMessage(null)}
-              className="text-xs font-bold underline cursor-pointer"
+              className="text-xs font-bold underline cursor-pointer ml-3 shrink-0"
             >
-              Bỏ qua
+              Đóng
             </button>
           </div>
         )}
