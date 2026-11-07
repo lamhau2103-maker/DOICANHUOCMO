@@ -1,0 +1,6 @@
+{
+  "name": "Đôi Cánh Ước Mơ Lớp 2",
+  "description": "Ứng dụng biến ước mơ nghề nghiệp của học sinh lớp 2 thành khung ảnh kỷ niệm chân thực với nhận diện khuôn mặt AI và xuất ảnh sắc nét.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
