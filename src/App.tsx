@@ -11,6 +11,7 @@ import { DreamCard } from './components/DreamCard';
 import { AnalysisInspector, FacialAnalysisResult } from './components/AnalysisInspector';
 import { HelpModal } from './components/HelpModal';
 import { SAMPLE_STUDENTS } from './data/careerTemplates';
+import { compressAndResizeImage } from './utils/imageCompressor';
 import { Sparkles, AlertCircle } from 'lucide-react';
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [cardError, setCardError] = useState<string | null>(null);
 
   // Trigger celebratory confetti
   const triggerConfetti = () => {
@@ -72,7 +74,7 @@ export default function App() {
     });
   };
 
-  // Main 5-step strict photorealistic generation pipeline
+  // Main strict photorealistic generation pipeline with Vietnamese error handling
   const handleGenerate = async () => {
     if (!formData.photoUrl || !formData.fullName || !formData.dreamCareer) {
       alert('Vui lòng điền đầy đủ họ tên, lớp, ước mơ và tải ảnh chân dung học sinh.');
@@ -81,19 +83,27 @@ export default function App() {
 
     setIsLoading(true);
     setErrorMessage(null);
+    setCardError(null);
 
     try {
-      // Chuẩn bị dữ liệu base64 ảnh gốc
-      const base64Data = await ensureBase64(formData.photoBase64 || formData.photoUrl);
+      // 1. Chuyển đổi và thu nhỏ ảnh về tối đa 1024px cạnh dài (JPEG chất lượng 0.85)
+      const rawBase64 = await ensureBase64(formData.photoBase64 || formData.photoUrl);
+      const compressed = await compressAndResizeImage(rawBase64);
+      console.log(`[Ảnh học sinh] Đã chuẩn hóa: ${compressed.width}x${compressed.height}px, dung lượng: ${(compressed.pureBase64.length / 1024).toFixed(1)} KB`);
 
-      // Bước 1: Quét khuôn mặt
+      // 2. Bước 1: Quét khuôn mặt
       setLoadingStep('Đang quét khuôn mặt…');
       const valRes = await fetch('/api/validate-face', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: base64Data }),
+        body: JSON.stringify({
+          imageBase64: compressed.pureBase64,
+          mimeType: compressed.mimeType,
+        }),
       });
       const valData = await valRes.json().catch(() => ({ valid: true }));
+      console.log('Kết quả kiểm tra khuôn mặt:', valData);
+
       if (valData.valid === false) {
         throw new Error(
           valData.error ||
@@ -101,17 +111,14 @@ export default function App() {
         );
       }
 
-      // Bước 2: Tách nền & thiết lập mô tả nghề
-      setLoadingStep('Đang tách nền…');
-      await new Promise((r) => setTimeout(r, 600));
-
-      // Bước 3, 4, 5: Tạo ảnh chân thực bằng model AI với ảnh gốc làm tham chiếu
+      // 3. Bước 2: Tạo ảnh chân thực bằng model AI (có tự động thử lại tối đa 2 lần trên server)
       setLoadingStep('Đang tạo ảnh chân thực…');
       const processRes = await fetch('/api/process-dream-photo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          imageBase64: base64Data,
+          imageBase64: compressed.pureBase64,
+          mimeType: compressed.mimeType,
           studentName: formData.fullName,
           studentClass: formData.studentClass,
           dreamCareer: formData.dreamCareer,
@@ -119,15 +126,18 @@ export default function App() {
       });
 
       const resultData = await processRes.json();
+      console.log('Kết quả tạo ảnh từ API:', resultData);
 
       if (!processRes.ok || !resultData.imageUrl) {
-        throw new Error(
+        const errorReason =
           resultData.error ||
-            'Không thể tạo được ảnh chân thực vào lúc này do máy chủ đang bận. Vui lòng bấm thử lại sau giây lát.'
-        );
+          'Không thể tạo được ảnh chân thực vào lúc này do máy chủ đang bận. Vui lòng bấm thử lại sau giây lát.';
+        throw new Error(errorReason);
       }
 
+      // Đặt ảnh chân thực nhận được vào khung kết quả
       setPortraitResult(resultData.imageUrl);
+      setCardError(null);
       setAnalysisResult({
         facialAnalysis: 'Khuôn mặt chụp thật được bảo tồn trọn vẹn đặc trưng nhận dạng nhân trắc học.',
         hairDetails: 'Chân tóc và kiểu tóc thật của học sinh được giữ nguyên.',
@@ -141,8 +151,10 @@ export default function App() {
 
       triggerConfetti();
     } catch (error: any) {
-      console.error('Generation pipeline error:', error);
-      setErrorMessage(error.message || 'Đã có lỗi xảy ra trong quá trình tạo ảnh.');
+      console.error('Lỗi trong hàm handleGenerate:', error);
+      const userMessage = error.message || 'Đã có lỗi xảy ra trong quá trình tạo ảnh.';
+      setErrorMessage(userMessage);
+      setCardError(userMessage);
     } finally {
       setIsLoading(false);
       setLoadingStep('');
@@ -216,6 +228,8 @@ export default function App() {
               careerTitleVi={analysisResult?.careerTitleVi}
               inspirationalMessage={analysisResult?.inspirationalMessage}
               isGenerating={isLoading}
+              loadingStep={loadingStep}
+              cardError={cardError}
               onRegenerate={handleGenerate}
               onOpenAnalysis={() => setIsAnalysisModalOpen(true)}
             />

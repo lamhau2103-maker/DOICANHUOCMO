@@ -55,7 +55,6 @@ function normalizeKey(str: string): string {
 async function resolveCareerSpec(dreamCareer: string, studentName: string): Promise<CareerSpec> {
   const norm = normalizeKey(dreamCareer);
 
-  // Check direct matches in canonical dictionary
   if (norm.includes('bac si') || norm.includes('nhi khoa') || norm.includes('y ta') || norm.includes('doctor')) {
     return CANONICAL_CAREERS['bac-si'];
   }
@@ -102,17 +101,17 @@ async function resolveCareerSpec(dreamCareer: string, studentName: string): Prom
     return CANONICAL_CAREERS['lap-trinh-vien'];
   }
 
-  // If not found in table, use Gemini text model to deduce according to the exact same schema
+  // If not found in table, deduce via Gemini
   if (ai) {
     try {
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
-        contents: `Quy tắc: Cho nghề "${dreamCareer}" của học sinh tiểu học, hãy tự suy luận mô tả theo ĐÚNG khuôn mẫu:
+        contents: `Quy tắc: Cho nghề "${dreamCareer}" của học sinh, hãy mô tả chân thực theo ĐÚNG khuôn mẫu:
 trang phục thật, dụng cụ thật, địa điểm thật, ánh sáng phù hợp.
-Trả về định dạng JSON:
+Trả về JSON duy nhất:
 {
-  "professionEn": "tên nghề tiếng Anh (ví dụ: marine biologist)",
-  "outfitAndProps": "mô tả trang phục thật và dụng cụ chi tiết bằng tiếng Anh",
+  "professionEn": "tên nghề tiếng Anh",
+  "outfitAndProps": "mô tả trang phục và dụng cụ chi tiết bằng tiếng Anh",
   "setting": "mô tả bối cảnh thật chi tiết bằng tiếng Anh",
   "pose": "mô tả dáng chụp tự nhiên bằng tiếng Anh",
   "lighting": "mô tả ánh sáng tự nhiên bằng tiếng Anh",
@@ -127,7 +126,7 @@ Trả về định dạng JSON:
         const parsed = JSON.parse(response.text.trim());
         return {
           professionEn: parsed.professionEn || dreamCareer,
-          outfitAndProps: parsed.outfitAndProps || `authentic realistic miniature ${dreamCareer} uniform`,
+          outfitAndProps: parsed.outfitAndProps || `authentic realistic tailored miniature ${dreamCareer} uniform`,
           setting: parsed.setting || `authentic real-world professional ${dreamCareer} workplace`,
           pose: parsed.pose || 'natural confident friendly smile, looking at camera',
           lighting: parsed.lighting || 'natural soft ambient lighting',
@@ -139,7 +138,6 @@ Trả về định dạng JSON:
     }
   }
 
-  // Default fallback spec
   return {
     professionEn: dreamCareer,
     outfitAndProps: `authentic realistic tailored miniature ${dreamCareer} uniform with name badge "${studentName || 'Student'}"`,
@@ -164,100 +162,24 @@ app.post('/api/validate-face', async (req, res) => {
       });
     }
 
-    if (!ai) {
-      // Mock validation when offline
-      return res.json({ valid: true });
+    if (!process.env.GEMINI_API_KEY || !ai) {
+      return res.status(500).json({
+        valid: false,
+        error: 'Hệ thống chưa tìm thấy GEMINI_API_KEY. Vui lòng cấu hình API key trong bảng Secrets của AI Studio.',
+      });
     }
 
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
 
     const checkPrompt = `Kiểm tra ảnh này:
 Yêu cầu bắt buộc:
-1. Ảnh có đúng 1 khuôn mặt người/trẻ em thật, nhìn rõ nét ngũ quan, không bị mờ nhòe nghiêm trọng?
+1. Ảnh có khuôn mặt người/học sinh thật, rõ nét ngũ quan, không bị mờ nhòe nghiêm trọng?
 2. Ảnh KHÔNG PHẢI là tranh vẽ, hoạt hình, anime, chibi, 3D CGI, hình vẽ vector hay avatar nhân tạo?
 3. Nếu ảnh thỏa mãn: trả về JSON { "valid": true, "reason": "Ảnh chân dung người thật hợp lệ" }.
 4. Nếu ảnh KHÔNG có mặt, có nhiều hơn 1 người, quá mờ, hoặc là hoạt hình/hình vẽ: trả về JSON { "valid": false, "reason": "Không tìm thấy khuôn mặt rõ nét của học sinh trong ảnh. Vui lòng tải lên ảnh chụp chính diện, rõ mặt và không bị mờ nhòe." }.`;
 
-    let validationRes: any = null;
-    const modelsToCheck = ['gemini-2.5-flash', 'gemini-3.8-flash'];
-    for (const model of modelsToCheck) {
-      try {
-        const resp = await ai.models.generateContent({
-          model,
-          contents: {
-            parts: [
-              {
-                inlineData: {
-                  data: cleanBase64,
-                  mimeType: mimeType || 'image/jpeg',
-                },
-              },
-              { text: checkPrompt },
-            ],
-          },
-          config: { responseMimeType: 'application/json' },
-        });
-
-        if (resp.text) {
-          validationRes = JSON.parse(resp.text.trim());
-          break;
-        }
-      } catch (err) {
-        console.warn(`Validation check with ${model} failed, trying next...`);
-      }
-    }
-
-    if (!validationRes || validationRes.valid !== false) {
-      return res.json({ valid: true });
-    }
-
-    return res.json({
-      valid: false,
-      error: validationRes.reason || 'Không tìm thấy khuôn mặt rõ nét của học sinh trong ảnh. Vui lòng tải lên ảnh chụp chính diện, rõ mặt và không bị mờ nhòe.',
-    });
-  } catch (err: any) {
-    console.error('Error in /api/validate-face:', err);
-    res.json({ valid: true }); // Graceful fallback
-  }
-});
-
-/**
- * Complete Pipeline: Process Real Photographic Dream Image
- */
-app.post('/api/process-dream-photo', async (req, res) => {
-  try {
-    const {
-      imageBase64,
-      mimeType = 'image/jpeg',
-      studentName = 'Học sinh',
-      studentClass = '2',
-      dreamCareer,
-    } = req.body;
-
-    if (!imageBase64) {
-      return res.status(400).json({
-        error: 'Vui lòng tải lên ảnh chân dung của học sinh.',
-      });
-    }
-
-    if (!dreamCareer) {
-      return res.status(400).json({
-        error: 'Vui lòng nhập ước mơ của học sinh.',
-      });
-    }
-
-    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-
-    if (!ai) {
-      return res.status(500).json({
-        error: 'Chưa cấu hình GEMINI_API_KEY. Vui lòng kiểm tra khóa API trong hệ thống.',
-      });
-    }
-
-    // Bước 1: Kiểm tra khuôn mặt rõ nét
-    const checkPrompt = `Kiểm tra ảnh này: có đúng 1 khuôn mặt người thật rõ nét không? Trả về JSON { "valid": boolean, "reason": string }`;
     try {
-      const faceCheck = await ai.models.generateContent({
+      const resp = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: {
           parts: [
@@ -273,44 +195,93 @@ app.post('/api/process-dream-photo', async (req, res) => {
         config: { responseMimeType: 'application/json' },
       });
 
-      if (faceCheck.text) {
-        const parsedCheck = JSON.parse(faceCheck.text.trim());
-        if (parsedCheck.valid === false) {
-          return res.status(422).json({
-            error: parsedCheck.reason || 'Không tìm thấy khuôn mặt rõ nét của học sinh trong ảnh. Vui lòng tải lên ảnh chụp chính diện, rõ mặt và không bị mờ nhòe.',
+      if (resp.text) {
+        const parsed = JSON.parse(resp.text.trim());
+        if (parsed.valid === false) {
+          return res.json({
+            valid: false,
+            error: parsed.reason || 'Không tìm thấy khuôn mặt rõ nét của học sinh trong ảnh. Vui lòng tải lên ảnh chụp chính diện, rõ mặt và không bị mờ nhòe.',
           });
         }
       }
-    } catch (checkErr) {
-      console.warn('Face check skipped/transient error:', checkErr);
+    } catch (err) {
+      console.warn('Face validation API warning (skipped to allow upload):', err);
     }
 
-    // Bước 2 & 3: Chọn mô tả nghề tương ứng trong bảng
+    return res.json({ valid: true });
+  } catch (err: any) {
+    console.error('Error in /api/validate-face:', err);
+    res.json({ valid: true });
+  }
+});
+
+/**
+ * Step 2: Tạo ảnh ước mơ chân thực bằng mô hình ảnh AI
+ */
+app.post('/api/process-dream-photo', async (req, res) => {
+  try {
+    const {
+      imageBase64,
+      mimeType = 'image/jpeg',
+      studentName = 'Học sinh',
+      studentClass = '2',
+      dreamCareer,
+    } = req.body;
+
+    // 1. Kiểm tra API Key
+    if (!process.env.GEMINI_API_KEY || !ai) {
+      console.error('Lỗi: Thiếu GEMINI_API_KEY trên máy chủ.');
+      return res.status(500).json({
+        error: 'Thiếu API Key: Hệ thống chưa cấu hình GEMINI_API_KEY. Vui lòng kiểm tra bảng điều khiển AI Studio Secrets.',
+        code: 'MISSING_API_KEY',
+      });
+    }
+
+    if (!imageBase64) {
+      return res.status(400).json({
+        error: 'Vui lòng tải lên ảnh chân dung của học sinh.',
+      });
+    }
+
+    if (!dreamCareer) {
+      return res.status(400).json({
+        error: 'Vui lòng nhập ước mơ của học sinh.',
+      });
+    }
+
+    // Lấy chuỗi base64 thuần, bỏ tiền tố "data:image/...;base64,"
+    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+
+    // 2. Tra cứu & Ghép vào PROMPT MẪU
     const spec = await resolveCareerSpec(dreamCareer, studentName);
-
-    // Bước 4: Ghép vào PROMPT MẪU bắt buộc
     const photorealisticPrompt = buildPhotorealisticPrompt(spec);
-    console.log('Sending photorealistic prompt to image model:\n', photorealisticPrompt);
+    console.log('--- BẮT ĐẦU TẠO ẢNH CHÂN THỰC ---');
+    console.log('Học sinh:', studentName, '| Ước mơ:', spec.vietnameseTitle);
+    console.log('Prompt:', photorealisticPrompt);
 
-    // Bước 5: Gửi cùng ảnh gốc tới model ảnh thật (Thử lại tối đa 2 lần nếu chưa đạt)
-    const imageModels = [
+    // 3. Danh sách model tạo ảnh chân thực hỗ trợ ảnh đầu vào theo tài liệu
+    const candidateModels = [
       'gemini-2.5-flash-image',
       'gemini-3.1-flash-lite-image',
+      'gemini-nano-banana-2.1',
       'imagen-3.0-generate-002',
     ];
 
     let generatedImageUrl: string | null = null;
-    let attempts = 0;
+    let lastFailureReason = '';
+    let attemptCount = 0;
     const maxAttempts = 3; // 1 lần đầu + tối đa 2 lần thử lại
 
-    while (!generatedImageUrl && attempts < maxAttempts) {
-      attempts++;
-      console.log(`Generating real photograph - Attempt ${attempts}/${maxAttempts}...`);
+    while (!generatedImageUrl && attemptCount < maxAttempts) {
+      attemptCount++;
+      console.log(`[Lần thử ${attemptCount}/${maxAttempts}] Đang gọi mô hình tạo ảnh chân thực...`);
 
-      for (const modelName of imageModels) {
+      for (const modelName of candidateModels) {
         try {
+          console.log(`Đang gọi mô hình: ${modelName}`);
+
           if (modelName.startsWith('imagen-')) {
-            // Imagen 3 call
+            // Gọi Imagen 3
             const imgRes = await ai.models.generateImages({
               model: modelName,
               prompt: photorealisticPrompt,
@@ -319,14 +290,16 @@ app.post('/api/process-dream-photo', async (req, res) => {
                 aspectRatio: '3:4',
               },
             });
+            console.log(`[${modelName}] Response:`, JSON.stringify(imgRes, null, 2));
+
             const bytes = imgRes.generatedImages?.[0]?.image?.imageBytes;
             if (bytes) {
               generatedImageUrl = `data:image/jpeg;base64,${bytes}`;
-              console.log(`Successfully generated photo using ${modelName}`);
+              console.log(`==> Tạo ảnh thành công với model ${modelName}!`);
               break;
             }
           } else {
-            // Multimodal Image model (gemini-2.5-flash-image / gemini-3.1-flash-lite-image)
+            // Gọi Gemini Image Model với cả TEXT và IMAGE trong responseModalities
             const resp = await ai.models.generateContent({
               model: modelName,
               contents: {
@@ -342,32 +315,74 @@ app.post('/api/process-dream-photo', async (req, res) => {
                   },
                 ],
               },
+              config: {
+                responseModalities: ['TEXT', 'IMAGE'],
+                imageConfig: {
+                  aspectRatio: '3:4',
+                },
+              },
             });
 
-            for (const part of resp.candidates?.[0]?.content?.parts ?? []) {
+            console.log(`[${modelName}] Response:`, JSON.stringify(resp, null, 2));
+
+            // Kiểm tra candidates và finishReason
+            const candidate = resp.candidates?.[0];
+            const finishReason = candidate?.finishReason;
+            const promptFeedback = (resp as any).promptFeedback;
+
+            if (finishReason === 'SAFETY' || promptFeedback?.blockReason === 'SAFETY') {
+              lastFailureReason = 'Ảnh bị bộ lọc an toàn của AI từ chối. Vui lòng chọn ảnh chân dung khác rõ ràng và tươm tất hơn.';
+              console.warn(`[${modelName}] Bị bộ lọc an toàn chặn (finishReason: ${finishReason})`);
+              continue;
+            }
+
+            // Duyệt qua parts tìm inlineData
+            for (const part of candidate?.content?.parts ?? []) {
               if (part.inlineData?.data) {
                 const partMime = part.inlineData.mimeType || 'image/png';
                 generatedImageUrl = `data:${partMime};base64,${part.inlineData.data}`;
-                console.log(`Successfully generated photo using ${modelName}`);
+                console.log(`==> Tạo ảnh thành công với model ${modelName}! Kích thước dữ liệu:`, part.inlineData.data.length);
                 break;
+              } else if (part.text) {
+                console.log(`[${modelName}] Model trả về text thay vì ảnh:`, part.text.slice(0, 150));
               }
             }
+
             if (generatedImageUrl) break;
+
+            if (finishReason) {
+              lastFailureReason = `Model không trả ảnh (finishReason: ${finishReason}).`;
+            }
           }
         } catch (modelErr: any) {
-          console.warn(`Model ${modelName} failed on attempt ${attempts}:`, modelErr.message);
+          const errMsg = modelErr.message || String(modelErr);
+          console.error(`[${modelName}] Thất bại ở lần thử ${attemptCount}:`, errMsg);
+
+          if (errMsg.includes('403') || errMsg.includes('PERMISSION_DENIED') || errMsg.includes('API_KEY_INVALID')) {
+            lastFailureReason = 'Khóa API (GEMINI_API_KEY) không có quyền sử dụng model tạo ảnh này hoặc không hợp lệ. Vui lòng kiểm tra quyền hạn của khóa API.';
+          } else if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED')) {
+            lastFailureReason = 'Đã hết hạn mức yêu cầu API (Quota / Rate limit). Vui lòng thử lại sau vài phút.';
+          } else if (errMsg.includes('404') || errMsg.includes('NOT_FOUND')) {
+            lastFailureReason = `Model ${modelName} hiện không khả dụng trên tài khoản này.`;
+          } else {
+            lastFailureReason = `Lỗi từ AI: ${errMsg}`;
+          }
         }
       }
 
       if (generatedImageUrl) break;
-      // Wait 1.2s before next retry if needed
-      await new Promise((r) => setTimeout(r, 1200));
+
+      // Chờ 1 giây trước khi tự động thử lại
+      if (attemptCount < maxAttempts) {
+        await new Promise((r) => setTimeout(r, 1000));
+      }
     }
 
+    // Nếu sau tất cả các lần thử vẫn không nhận được ảnh
     if (!generatedImageUrl) {
-      // Báo lỗi tiếng Việt, cấm tuyệt đối trả về ảnh hoạt hình/canvas
-      return res.status(503).json({
-        error: 'Không thể tạo được ảnh chân thực vào lúc này do máy chủ ảnh đang bận. Vui lòng bấm thử lại sau giây lát.',
+      console.error('==> Thất bại hoàn toàn sau 3 lần thử:', lastFailureReason);
+      return res.status(500).json({
+        error: lastFailureReason || 'Không thể tạo được ảnh chân thực vào lúc này do máy chủ ảnh đang bận. Vui lòng bấm thử lại sau giây lát.',
       });
     }
 

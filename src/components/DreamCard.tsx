@@ -11,6 +11,8 @@ import {
   Palette,
   Heart,
   ZoomIn,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { FRAME_THEMES, CardFrameTheme } from '../data/careerTemplates';
 
@@ -29,6 +31,8 @@ interface DreamCardProps {
   careerTitleVi?: string;
   inspirationalMessage?: string;
   isGenerating: boolean;
+  loadingStep?: string;
+  cardError?: string | null;
   onRegenerate?: () => void;
   onOpenAnalysis?: () => void;
 }
@@ -41,6 +45,8 @@ export const DreamCard: React.FC<DreamCardProps> = ({
   careerTitleVi,
   inspirationalMessage,
   isGenerating,
+  loadingStep,
+  cardError,
   onRegenerate,
   onOpenAnalysis,
 }) => {
@@ -231,14 +237,38 @@ export const DreamCard: React.FC<DreamCardProps> = ({
                     <div className="w-20 h-20 rounded-full border-4 border-amber-300 border-t-pink-500 animate-spin" />
                     <Sparkles className="w-8 h-8 text-amber-500 absolute inset-0 m-auto animate-pulse" />
                   </div>
-                  <div>
-                    <p className="text-sm font-bold text-slate-800">
-                      Đang biến hóa ước mơ...
+                  <div className="space-y-1">
+                    <p className="text-sm font-black text-slate-800 uppercase tracking-wide">
+                      {loadingStep || 'Đang tạo ảnh chân thực…'}
                     </p>
-                    <p className="text-xs text-slate-500 mt-1">
+                    <p className="text-xs text-slate-500">
                       Tái tạo chân thực như ngoài đời trong trang phục {displayCareer}
                     </p>
                   </div>
+                </div>
+              ) : cardError ? (
+                /* Error State Displayed Directly Inside Card Frame */
+                <div className="flex flex-col items-center justify-center p-6 text-center space-y-3 bg-rose-50/95 border-2 border-dashed border-rose-300 w-full h-full rounded-2xl">
+                  <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shadow-xs">
+                    <AlertTriangle className="w-7 h-7 text-rose-600" />
+                  </div>
+                  <div className="space-y-1.5 max-w-[280px]">
+                    <h4 className="text-sm font-black text-rose-900 uppercase tracking-wide">
+                      Không Thể Tạo Ảnh
+                    </h4>
+                    <p className="text-xs text-rose-800 leading-relaxed font-medium bg-white/90 p-2.5 rounded-xl border border-rose-200/80 shadow-2xs">
+                      {cardError}
+                    </p>
+                  </div>
+                  {onRegenerate && (
+                    <button
+                      type="button"
+                      onClick={onRegenerate}
+                      className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 mt-1"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" /> Thử lại ngay
+                    </button>
+                  )}
                 </div>
               ) : (
                 /* Placeholder State */
@@ -249,7 +279,7 @@ export const DreamCard: React.FC<DreamCardProps> = ({
                   <div>
                     <h4 className="text-sm font-bold text-slate-700">Khung Ảnh Kỷ Niệm Sẵn Sàng</h4>
                     <p className="text-xs text-slate-500 max-w-[240px] mt-1">
-                      Tải ảnh bé & bấm nút "Biến Ước Mơ Thành Sự Thật" để xuất hiện chân dung tại đây!
+                      Tải ảnh bé & bấm nút "TẠO ẢNH ƯỚC MƠ" để xuất hiện chân dung tại đây!
                     </p>
                   </div>
                 </div>
